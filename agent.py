@@ -1,3 +1,89 @@
+class DemandForecastAgent:
+    def __init__(self, context=None):
+        self.groq_client = groq.Groq(api_key=os.getenv('GROQ_API_KEY'))
+        self.context = context if context is not None else {}
+
+    def generate_demand_forecast(self, historical_sales: list, market_trends: dict, seasonality: dict, economic_data: dict, customer_profiles: list, inventory: dict, competition: dict, feedback: list) -> str:
+        """
+        Forecast market and customer demand, provide recommendations, and suggest pricing using Groq API (llama3-70b-8192).
+        Args:
+            historical_sales (list): List of sales records (dicts)
+            market_trends (dict): Market trend data
+            seasonality (dict): Seasonality data
+            economic_data (dict): Economic indicators
+            customer_profiles (list): List of customer profile dicts
+            inventory (dict): {product: stock_level}
+            competition (dict): {product: competitor_price}
+            feedback (list): List of customer feedback strings
+        Returns:
+            str: Demand forecast report and suggested actions as a string
+        """
+        prompt = f"""
+You are an expert AI agent for demand forecasting and marketing in the electronics supply chain.
+Given the following:
+- Historical sales: {json.dumps(historical_sales)}
+- Market trends: {json.dumps(market_trends)}
+- Seasonality: {json.dumps(seasonality)}
+- Economic data: {json.dumps(economic_data)}
+- Customer profiles: {json.dumps(customer_profiles)}
+- Inventory: {json.dumps(inventory)}
+- Competition: {json.dumps(competition)}
+- Customer feedback: {json.dumps(feedback)}
+
+Your tasks:
+- Predict demand at product-category and region levels
+- Provide personalized product recommendations
+- Suggest dynamic pricing strategies
+- Summarize customer feedback for product improvement
+
+Use the Groq API (llama3-70b-8192) to generate actionable demand forecasts and marketing insights.
+Return ONLY the demand forecast report and suggested actions as a string. Do not return any explanation or JSON.
+"""
+        response = self.groq_client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+        report = response.choices[0].message.content.strip()
+        return report
+class LogisticsManagerAgent:
+    def __init__(self, context=None):
+        self.groq_client = groq.Groq(api_key=os.getenv('GROQ_API_KEY'))
+        self.context = context if context is not None else {}
+
+    def generate_logistics_plan(self, finished_goods: list, locations: dict, timelines: dict) -> str:
+        """
+        Manage global logistics and fulfillment for electronic components using Groq API (llama3-70b-8192).
+        Args:
+            finished_goods (list): List of dicts with keys: part_number, quantity, destination
+            locations (dict): {destination: address or region}
+            timelines (dict): {part_number: delivery_deadline}
+        Returns:
+            str: Optimized shipment plan and warehouse allocation as a string
+        """
+        prompt = f"""
+You are an expert AI agent for global logistics and fulfillment in the electronics supply chain.
+Given the following:
+- Finished goods: {json.dumps(finished_goods)}
+- Locations: {json.dumps(locations)}
+- Timelines: {json.dumps(timelines)}
+
+Your tasks:
+- Optimize transportation routes and modes (air/sea/road) for each shipment based on cost and speed
+- Track shipments in real time and handle warehousing instructions
+- Ensure documentation (customs clearance, compliance certificates) is generated
+- Plan last-mile delivery and send updates to stakeholders
+
+Use the Groq API (llama3-70b-8192) to generate logistics decisions and route summaries.
+Return ONLY the optimized shipment plan and warehouse allocation as a string. Do not return any explanation or JSON.
+"""
+        response = self.groq_client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+        plan = response.choices[0].message.content.strip()
+        return plan
 import os
 import json
 import logging
@@ -37,10 +123,11 @@ class RiskAssessment:
     supplier_rating: float
 
 class ElectronicComponentAgent:
-    def __init__(self):
+    def __init__(self, context=None):
         self.groq_client = groq.Groq(api_key=os.getenv('GROQ_API_KEY'))
         self.components_db = {}
         self.risk_assessments = {}
+        self.context = context if context is not None else {}
         
     def source_component(self, part_number: str, quantity: int = 1) -> Optional[Component]:
         """Source electronic component with risk assessment"""
@@ -248,6 +335,43 @@ def main():
         
         optimization = agent.optimize_sourcing(["LM741", "LM358", "OP07"])
         print(f"Optimization: {json.dumps(optimization, indent=2)}")
+
+
+# --- New Agent for Production Scheduling and Inventory Optimization ---
+class ProductionSchedulerAgent:
+    def __init__(self, context=None):
+        self.groq_client = groq.Groq(api_key=os.getenv('GROQ_API_KEY'))
+        self.context = context if context is not None else {}
+
+    def generate_production_plan(self, components: list, stock_levels: dict, production_capacity: int) -> str:
+        """
+        Generate an optimal production schedule and reorder recommendations using Groq API (llama3-70b-8192).
+        Args:
+            components (list): List of dicts with keys: part_number, lead_time, available_qty
+            stock_levels (dict): {part_number: current_stock}
+            production_capacity (int): Max units that can be produced per cycle
+        Returns:
+            str: Final production plan as a string
+        """
+        prompt = f"""
+You are an expert AI agent for electronics supply chain production scheduling and inventory optimization.
+Given the following:
+- Components (with part numbers, available quantities, and lead times): {json.dumps(components)}
+- Current stock levels: {json.dumps(stock_levels)}
+- Production capacity: {production_capacity} units per cycle
+
+Analyze the data and output ONLY the final production plan as a string. The plan should include:
+- Optimal production schedule (what to produce, when, and how much)
+- Reorder recommendations (which components to reorder, how many, and when)
+Do not return any explanation or JSON, only the final production plan as a string.
+"""
+        response = self.groq_client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+        plan = response.choices[0].message.content.strip()
+        return plan
 
 if __name__ == "__main__":
     main()
