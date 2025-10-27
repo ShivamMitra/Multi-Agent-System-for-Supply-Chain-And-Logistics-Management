@@ -471,6 +471,27 @@ with tabs[0]:
             st.markdown("### 📋 Demand Forecast Table")
             for df in tables:
                 st.table(df)
+            # Demand Report derived from the table data
+            try:
+                combined = pd.concat(tables, ignore_index=True)
+                quarter_cols = [c for c in combined.columns if c.strip().upper() in ["Q1","Q2","Q3","Q4"]]
+                for c in quarter_cols:
+                    combined[c] = pd.to_numeric(combined[c], errors='coerce')
+                id_vars = [col for col in combined.columns if col not in quarter_cols]
+                melted = combined.melt(id_vars=id_vars, value_vars=quarter_cols, var_name='Quarter', value_name='Forecast').dropna(subset=['Forecast'])
+                st.markdown("### 📈 Demand Report")
+                if 'Product' in melted.columns:
+                    fig_line = px.line(melted, x='Quarter', y='Forecast', color='Product', markers=True, title="Forecast by Quarter (All Products)")
+                    st.plotly_chart(fig_line, use_container_width=True)
+                # Summary totals by Product
+                if 'Product' in combined.columns and quarter_cols:
+                    summary_df = combined.copy()
+                    summary_df['Total'] = summary_df[quarter_cols].sum(axis=1, numeric_only=True)
+                    summary = summary_df.groupby('Product', as_index=False)['Total'].sum().sort_values('Total', ascending=False)
+                    st.markdown("#### Product Totals (Q1–Q4)")
+                    st.dataframe(summary, use_container_width=True)
+            except Exception:
+                pass
         else:
             st.markdown("### 📋 Latest Output")
             st.markdown('<div class="agent-output">', unsafe_allow_html=True)
