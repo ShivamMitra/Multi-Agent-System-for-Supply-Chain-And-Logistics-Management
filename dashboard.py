@@ -40,6 +40,8 @@ This dashboard provides real-time monitoring and control of the AI-powered suppl
 The system consists of four specialized agents working together to optimize the supply chain process.
 """)
 
+ 
+
 # Initialize session state
 if 'context' not in st.session_state:
     st.session_state['context'] = {}
@@ -154,13 +156,66 @@ def parse_agent_output(output_text, agent_type):
     
     return parsed_data
 
+# Helper to sanitize markdown-like output for clean text display
+def _sanitize_output_text(text: str) -> str:
+    try:
+        # Remove bold/italic markers and bullet asterisks at line starts
+        lines = str(text).splitlines()
+        cleaned = []
+        for ln in lines:
+            cl = ln.replace('**', '').replace('__', '')
+            cl = re.sub(r'^\s*[\-*]\s*', '', cl)
+            cleaned.append(cl)
+        return "\n".join(cleaned)
+    except Exception:
+        return text
+
+def _extract_markdown_tables(text: str):
+    try:
+        lines = str(text).splitlines()
+        tables = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if '|' in line and i + 1 < len(lines) and re.fullmatch(r"\s*\|?\s*[:\-\s\|]+\s*\|?\s*", lines[i+1]):
+                header = line
+                sep = lines[i+1]
+                block = [header, sep]
+                j = i + 2
+                while j < len(lines) and '|' in lines[j] and lines[j].strip() != '':
+                    block.append(lines[j])
+                    j += 1
+                def parse_row(r):
+                    cells = [c.strip() for c in r.strip().split('|')]
+                    if cells and cells[0] == '':
+                        cells = cells[1:]
+                    if cells and cells[-1] == '':
+                        cells = cells[:-1]
+                    return cells
+                headers = parse_row(block[0])
+                data_rows = [parse_row(r) for r in block[2:]]
+                if headers and data_rows:
+                    maxlen = max(len(headers), max((len(r) for r in data_rows), default=0))
+                    headers = headers + [''] * (maxlen - len(headers))
+                    norm_rows = [r + [''] * (maxlen - len(r)) for r in data_rows]
+                    df = pd.DataFrame(norm_rows, columns=headers)
+                    tables.append(df)
+                i = j
+                continue
+            i += 1
+        return tables
+    except Exception:
+        return []
+
 # Function to update status
 def update_agent_status(agent, status):
     st.session_state['agent_status'][agent] = status
     st.session_state['last_run'] = time.strftime("%Y-%m-%d %H:%M:%S")
     if status == 'Completed':
         st.session_state['result_timestamps'][agent] = time.time()
-    st.rerun()
+    # Do not rerun when marking as Running, to allow the work to complete.
+    if status != 'Running':
+        st.rerun()
 
 # Function to clear old results when new ones are generated
 def clear_old_results():
@@ -171,29 +226,20 @@ def clear_old_results():
 # Sidebar controls
 with st.sidebar:
     st.title("🛠️ Controls")
-    run_all = st.button("🚀 Run Full Orchestration", use_container_width=True)
-    
-    st.markdown("### Individual Agents")
-    col1, col2 = st.columns(2)
-    with col1:
-        run_forecast = st.button("📈 Forecast Demand")
-        run_production = st.button("🏭 Schedule Production")
-    with col2:
-        run_sourcing = st.button("🔍 Source Components")
-        run_logistics = st.button("🚚 Plan Logistics")
-    
-    st.markdown("### Pipeline Options")
-    run_pipeline = st.button("🔄 Run Complete Pipeline", use_container_width=True)
-    
+    st.markdown("### Pipeline")
+    run_pipeline = st.button("🚀 Run Complete Pipeline", use_container_width=True, type="primary", help="Execute Agents 1→4 in sequence")
+    st.markdown("### Agents")
+    run_forecast = st.button("1) 📈 Forecast Demand", use_container_width=True, help="Agent 1: Demand & Marketing Insights")
+    run_production = st.button("2) 🏭 Schedule Production", use_container_width=True, help="Agent 2: Production & Inventory Optimization")
+    run_sourcing = st.button("3) 🔍 Source Components", use_container_width=True, help="Agent 3: Component Sourcing & Risk")
+    run_logistics = st.button("4) 🚚 Plan Logistics", use_container_width=True, help="Agent 4: Global Logistics & Fulfillment")
     st.markdown("### Data Management")
-    clear_results = st.button("🗑️ Clear All Results", use_container_width=True)
-    
+    clear_results = st.button("🗑️ Clear All Results", use_container_width=True, help="Reset context and outputs")
     st.markdown("---")
     st.markdown("### System Status")
     for agent, status in st.session_state['agent_status'].items():
         status_emoji = "✅" if status == "Completed" else "🔄" if status == "Running" else "❌"
         st.markdown(f"- {agent.replace('_', ' ').title()}: {status_emoji} {status}")
-    
     if st.session_state['last_run']:
         st.markdown(f"\nLast run: {st.session_state['last_run']}")
 
@@ -212,8 +258,325 @@ if clear_results:
     st.success("🗑️ All results cleared!")
     st.rerun()
 
-# Full Orchestration Pipeline
-if run_all and not run_pipeline:
+# Top-level handlers for sidebar agent runs (no dropdowns/expanders)
+if run_pipeline:
+    shared_context = {}
+    # Step 1: Demand Forecasting
+    try:
+        forecast_agent = DemandForecastAgent(context=shared_context)
+        historical_sales = [
+            {"product": "LM741", "region": "Europe", "sales": [100, 120, 130, 110]},
+            {"product": "LM358", "region": "North America", "sales": [90, 95, 100, 105]},
+            {"product": "OP07", "region": "Asia", "sales": [60, 70, 80, 75]}
+        ]
+        market_trends = {"Europe": "Stable", "North America": "Growing", "Asia": "Volatile"}
+        seasonality = {"Q1": "Low", "Q2": "Medium", "Q3": "High", "Q4": "Medium"}
+        economic_data = {"Europe": "Inflation 2%", "North America": "GDP growth 3%", "Asia": "Currency fluctuation"}
+        customer_profiles = [
+            {"customer_id": 1, "region": "Europe", "preferences": ["LM741", "OP07"]},
+            {"customer_id": 2, "region": "North America", "preferences": ["LM358"]}
+        ]
+        inventory = {"LM741": 300, "LM358": 150, "OP07": 80}
+        competition = {"LM741": 2.50, "LM358": 2.40, "OP07": 2.60}
+        feedback = [
+            "LM741 is reliable but sometimes out of stock.",
+            "LM358 price is competitive.",
+            "OP07 needs better documentation."
+        ]
+        forecast = forecast_agent.generate_demand_forecast(
+            historical_sales, market_trends, seasonality, economic_data,
+            customer_profiles, inventory, competition, feedback
+        )
+        shared_context['demand_forecast'] = forecast
+        st.session_state['agent_outputs']['demand_forecast'] = parse_agent_output(forecast, 'demand_forecast')
+    except Exception as e:
+        st.error(f"❌ Pipeline error (forecast): {e}")
+    # Step 2: Component Sourcing
+    try:
+        sourcing_agent = ComponentSourcingAgent(context=shared_context)
+        requirements = sourcing_agent.extract_requirements_from_forecast(shared_context.get('demand_forecast', ''))
+        sourcing_results = sourcing_agent.source_requirements(requirements)
+        shared_context['sourcing_results'] = sourcing_results
+        parsed_outputs = []
+        for result in sourcing_results.values():
+            if result:
+                parsed_outputs.append(parse_agent_output(result, 'component_sourcing'))
+        st.session_state['agent_outputs']['component_sourcing'] = parsed_outputs
+    except Exception as e:
+        st.error(f"❌ Pipeline error (sourcing): {e}")
+    # Step 3: Production Scheduling
+    try:
+        scheduler = ProductionSchedulerAgent(context=shared_context)
+        components = []
+        for pn, data in shared_context.get('sourcing_results', {}).items():
+            comp = (data or {}).get('component') or {}
+            components.append({
+                "part_number": pn,
+                "lead_time": comp.get('lead_time', 14),
+                "available_qty": comp.get('stock', 0)
+            })
+        stock_levels = {pn: (data.get('component') or {}).get('stock', 0) for pn, data in shared_context.get('sourcing_results', {}).items()}
+        production_capacity = 200
+        production_plan = scheduler.generate_production_plan(components, stock_levels, production_capacity)
+        shared_context['production_schedule'] = production_plan
+        st.session_state['agent_outputs']['production_schedule'] = parse_agent_output(production_plan, 'production_schedule')
+    except Exception as e:
+        st.error(f"❌ Pipeline error (production): {e}")
+    # Step 4: Logistics Planning
+    try:
+        logistics_agent = LogisticsManagerAgent(context=shared_context)
+        finished_goods = [
+            {"part_number": "LM741", "quantity": 400, "destination": "Berlin"},
+            {"part_number": "LM358", "quantity": 300, "destination": "New York"},
+            {"part_number": "OP07", "quantity": 200, "destination": "Tokyo"}
+        ]
+        locations = {"Berlin": "Berlin Warehouse, Germany", "New York": "NYC Fulfillment Center, USA", "Tokyo": "Tokyo Logistics Hub, Japan"}
+        timelines = {"LM741": "2025-08-20", "LM358": "2025-08-18", "OP07": "2025-08-25"}
+        logistics_plan = logistics_agent.generate_logistics_plan(finished_goods, locations, timelines)
+        shared_context['logistics_plan'] = logistics_plan
+        st.session_state['agent_outputs']['logistics'] = parse_agent_output(logistics_plan, 'logistics')
+    except Exception as e:
+        st.error(f"❌ Pipeline error (logistics): {e}")
+    # Finalize
+    st.session_state['context'] = shared_context
+    st.session_state['agent_status'] = {
+        'demand_forecast': 'Completed',
+        'production_schedule': 'Completed',
+        'component_sourcing': 'Completed',
+        'logistics': 'Completed',
+    }
+    st.session_state['last_run'] = time.strftime("%Y-%m-%d %H:%M:%S")
+    st.success("🎉 Complete pipeline executed. View results in the tabs above.")
+    st.rerun()
+
+if run_forecast:
+    clear_old_results()
+    update_agent_status('demand_forecast', 'Running')
+    forecast_agent = DemandForecastAgent(context=context)
+    historical_sales = [
+        {"product": "LM741", "region": "Europe", "sales": [100, 120, 130, 110]},
+        {"product": "LM358", "region": "North America", "sales": [90, 95, 100, 105]},
+        {"product": "OP07", "region": "Asia", "sales": [60, 70, 80, 75]}
+    ]
+    market_trends = {"Europe": "Stable", "North America": "Growing", "Asia": "Volatile"}
+    seasonality = {"Q1": "Low", "Q2": "Medium", "Q3": "High", "Q4": "Medium"}
+    economic_data = {"Europe": "Inflation 2%", "North America": "GDP growth 3%", "Asia": "Currency fluctuation"}
+    customer_profiles = [
+        {"customer_id": 1, "region": "Europe", "preferences": ["LM741", "OP07"]},
+        {"customer_id": 2, "region": "North America", "preferences": ["LM358"]}
+    ]
+    inventory = {"LM741": 300, "LM358": 150, "OP07": 80}
+    competition = {"LM741": 2.50, "LM358": 2.40, "OP07": 2.60}
+    feedback = [
+        "LM741 is reliable but sometimes out of stock.",
+        "LM358 price is competitive.",
+        "OP07 needs better documentation."
+    ]
+    try:
+        forecast = forecast_agent.generate_demand_forecast(
+            historical_sales, market_trends, seasonality, economic_data,
+            customer_profiles, inventory, competition, feedback
+        )
+        context['demand_forecast'] = forecast
+        parsed_output = parse_agent_output(forecast, 'demand_forecast')
+        st.session_state['agent_outputs']['demand_forecast'] = parsed_output
+        update_agent_status('demand_forecast', 'Completed')
+    except Exception as e:
+        st.error(f"❌ Error generating demand forecast: {str(e)}")
+        update_agent_status('demand_forecast', 'Error')
+
+if run_production:
+    update_agent_status('production_schedule', 'Running')
+    scheduler = ProductionSchedulerAgent(context=context)
+    components = [
+        {"part_number": "LM741", "lead_time": 14, "available_qty": 1200},
+        {"part_number": "LM358", "lead_time": 10, "available_qty": 900},
+        {"part_number": "OP07", "lead_time": 21, "available_qty": 500}
+    ]
+    stock_levels = {"LM741": 300, "LM358": 150, "OP07": 80}
+    production_capacity = 1000
+    try:
+        schedule = scheduler.generate_production_plan(
+            components, stock_levels, production_capacity=production_capacity
+        )
+        context['production_schedule'] = schedule
+        parsed_output = parse_agent_output(schedule, 'production_schedule')
+        st.session_state['agent_outputs']['production_schedule'] = parsed_output
+        update_agent_status('production_schedule', 'Completed')
+    except Exception as e:
+        st.error(f"❌ Error generating production schedule: {str(e)}")
+        update_agent_status('production_schedule', 'Error')
+
+if run_sourcing:
+    update_agent_status('component_sourcing', 'Running')
+    sourcing_agent = ComponentSourcingAgent(context=context)
+    try:
+        sample_forecast = "Demand for LM741: 100 units, LM358: 80 units, OP07: 60 units"
+        requirements = sourcing_agent.extract_requirements_from_forecast(sample_forecast)
+        sourcing_results = sourcing_agent.source_requirements(requirements)
+        context['sourcing_results'] = sourcing_results
+        parsed_outputs = []
+        for result in sourcing_results.values():
+            if result:
+                parsed_outputs.append(parse_agent_output(result, 'component_sourcing'))
+        st.session_state['agent_outputs']['component_sourcing'] = parsed_outputs
+        update_agent_status('component_sourcing', 'Completed')
+    except Exception as e:
+        st.error(f"❌ Error during component sourcing: {str(e)}")
+        update_agent_status('component_sourcing', 'Error')
+
+if run_logistics:
+    update_agent_status('logistics', 'Running')
+    logistics_agent = LogisticsManagerAgent(context=context)
+    finished_goods = [
+        {"part_number": "LM741", "quantity": 400, "destination": "Berlin"},
+        {"part_number": "LM358", "quantity": 300, "destination": "New York"},
+        {"part_number": "OP07", "quantity": 200, "destination": "Tokyo"}
+    ]
+    locations = {
+        "Berlin": "Berlin Warehouse, Germany",
+        "New York": "NYC Fulfillment Center, USA",
+        "Tokyo": "Tokyo Logistics Hub, Japan"
+    }
+    timelines = {
+        "LM741": "2025-08-20",
+        "LM358": "2025-08-18",
+        "OP07": "2025-08-25"
+    }
+    try:
+        plan = logistics_agent.generate_logistics_plan(finished_goods, locations, timelines)
+        context['logistics_plan'] = plan
+        parsed_output = parse_agent_output(plan, 'logistics')
+        st.session_state['agent_outputs']['logistics'] = parsed_output
+        update_agent_status('logistics', 'Completed')
+    except Exception as e:
+        st.error(f"❌ Error generating logistics plan: {str(e)}")
+        update_agent_status('logistics', 'Error')
+
+# Tabbed agent views (placed after handlers so results appear immediately)
+tabs = st.tabs([
+    "Agent 1: Demand Forecast",
+    "Agent 2: Production Schedule",
+    "Agent 3: Component Sourcing",
+    "Agent 4: Logistics Plan",
+])
+
+with tabs[0]:
+    status = st.session_state.get('agent_status', {}).get('demand_forecast', 'Not Run')
+    st.subheader(f"Status: {status}")
+    latest = st.session_state.get('context', {}).get('demand_forecast')
+    if latest:
+        tables = _extract_markdown_tables(latest)
+        if tables:
+            st.markdown("### 📋 Demand Forecast Table")
+            for df in tables:
+                st.table(df)
+        else:
+            st.markdown("### 📋 Latest Output")
+            st.markdown('<div class="agent-output">', unsafe_allow_html=True)
+            st.text(_sanitize_output_text(latest))
+            st.markdown('</div>', unsafe_allow_html=True)
+    parsed = st.session_state.get('agent_outputs', {}).get('demand_forecast')
+    if parsed and parsed.get('extracted_data'):
+        ed = parsed['extracted_data']
+        rows = []
+        for product, info in ed.items():
+            if isinstance(info, dict):
+                qtys = info.get('quantities', [])
+                rows.append({"Product": product, "Quantity": max(qtys) if qtys else 0})
+        if rows:
+            df = pd.DataFrame(rows)
+            fig = px.bar(df, x='Product', y='Quantity', title="Forecasted Mentions/Quantities", color_discrete_sequence=['#3498db'])
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Run Agent 1 to see results here.")
+
+with tabs[1]:
+    status = st.session_state.get('agent_status', {}).get('production_schedule', 'Not Run')
+    st.subheader(f"Status: {status}")
+    latest = st.session_state.get('context', {}).get('production_schedule')
+    if latest:
+        st.markdown("### 📋 Latest Output")
+        st.markdown('<div class="agent-output">', unsafe_allow_html=True)
+        st.text(latest)
+        st.markdown('</div>', unsafe_allow_html=True)
+    parsed = st.session_state.get('agent_outputs', {}).get('production_schedule')
+    if parsed and parsed.get('extracted_data'):
+        rows = []
+        for product, info in parsed['extracted_data'].items():
+            if isinstance(info, dict):
+                pq = info.get('production_quantities', [])
+                rows.append({"Product": product, "Production Quantity": max(pq) if pq else 0})
+        rows = [r for r in rows if r["Production Quantity"] > 0]
+        if rows:
+            df = pd.DataFrame(rows)
+            fig = px.bar(df, x='Product', y='Production Quantity', title="Production Quantities by Product", color_discrete_sequence=['#2ecc71'])
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Run Agent 2 to see results here.")
+
+with tabs[2]:
+    status = st.session_state.get('agent_status', {}).get('component_sourcing', 'Not Run')
+    st.subheader(f"Status: {status}")
+    sourcing_results = st.session_state.get('context', {}).get('sourcing_results')
+    if sourcing_results:
+        st.markdown("### 📋 Latest Output Summary")
+        for pn, data in sourcing_results.items():
+            comp = (data or {}).get('component') or {}
+            risk = (data or {}).get('risk_report') or {}
+            st.markdown(f"**Component: {pn}**")
+            st.markdown('<div class="agent-output">', unsafe_allow_html=True)
+            st.text(f"Requested Quantity: {data.get('requested_quantity', 0)}")
+            st.text(f"Stock Available: {comp.get('stock', 0)}")
+            st.text(f"Lead Time: {comp.get('lead_time', '-')} days")
+            st.text(f"Price: ${comp.get('price', '-')}")
+            if risk:
+                st.text(f"Risk Score: {risk.get('risk_score', '-')}/10")
+                st.text(f"Supplier Rating: {risk.get('supplier_rating', '-')}/10")
+            st.markdown('</div>', unsafe_allow_html=True)
+        rows = []
+        for pn, data in sourcing_results.items():
+            comp = (data or {}).get('component') or {}
+            risk = (data or {}).get('risk_report') or {}
+            rows.append({
+                'Part Number': pn,
+                'Price ($)': comp.get('price', 0),
+                'Stock': comp.get('stock', 0),
+                'Lead Time (days)': comp.get('lead_time', 0),
+                'Risk Score': risk.get('risk_score', 0),
+            })
+        if rows:
+            df = pd.DataFrame(rows)
+            fig_risk = px.bar(df, x='Part Number', y='Risk Score', title="Component Risk Assessment", color='Risk Score', color_continuous_scale='RdYlGn_r')
+            st.plotly_chart(fig_risk, use_container_width=True)
+            fig_lt_price = px.scatter(df, x='Lead Time (days)', y='Price ($)', size='Stock', color='Risk Score', text='Part Number', title="Price vs Lead Time")
+            st.plotly_chart(fig_lt_price, use_container_width=True)
+            st.dataframe(df, use_container_width=True)
+    else:
+        st.info("Run Agent 3 to see results here.")
+
+with tabs[3]:
+    status = st.session_state.get('agent_status', {}).get('logistics', 'Not Run')
+    st.subheader(f"Status: {status}")
+    latest = st.session_state.get('context', {}).get('logistics_plan')
+    if latest:
+        st.markdown("### 📋 Latest Output")
+        st.markdown('<div class="agent-output">', unsafe_allow_html=True)
+        st.text(latest)
+        st.markdown('</div>', unsafe_allow_html=True)
+    parsed = st.session_state.get('agent_outputs', {}).get('logistics')
+    if parsed and parsed.get('extracted_data'):
+        ed = parsed['extracted_data']
+        destinations = [k for k, v in ed.items() if isinstance(v, dict) and v.get('mentioned')]
+        if destinations:
+            df = pd.DataFrame({'Destination': destinations, 'Shipments': [1] * len(destinations)})
+            fig = px.pie(df, values='Shipments', names='Destination', title="Shipment Distribution by Destination")
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Run Agent 4 to see results here.")
+# Full Orchestration Pipeline (Legacy - Not Used)
+# This section is handled by the "Complete Pipeline Execution" expander below
+if False:  # Disabled - run_all variable was undefined
     st.info("🚀 Running Full Orchestration Pipeline...")
     
     # Clear old results to ensure fresh data
@@ -353,585 +716,8 @@ if run_all and not run_pipeline:
     st.session_state['last_run'] = time.strftime("%Y-%m-%d %H:%M:%S")
     st.rerun()
 
-# Agent 1: Demand Forecasting
-with st.expander("📊 Agent 1: Market & Demand Forecasting", expanded=True):
-    if st.button("▶️ Run Demand Forecast", key="forecast") or run_forecast or (run_all and not run_pipeline):
-        # Clear old results when running fresh
-        if not (run_all and not run_pipeline):
-            clear_old_results()
-        update_agent_status('demand_forecast', 'Running')
-        forecast_agent = DemandForecastAgent(context=context)
-        
-        # Sample data - in a real app, this would come from a database or API
-        historical_sales = [
-            {"product": "LM741", "region": "Europe", "sales": [100, 120, 130, 110]},
-            {"product": "LM358", "region": "North America", "sales": [90, 95, 100, 105]},
-            {"product": "OP07", "region": "Asia", "sales": [60, 70, 80, 75]}
-        ]
-        market_trends = {"Europe": "Stable", "North America": "Growing", "Asia": "Volatile"}
-        seasonality = {"Q1": "Low", "Q2": "Medium", "Q3": "High", "Q4": "Medium"}
-        economic_data = {"Europe": "Inflation 2%", "North America": "GDP growth 3%", "Asia": "Currency fluctuation"}
-        customer_profiles = [
-            {"customer_id": 1, "region": "Europe", "preferences": ["LM741", "OP07"]},
-            {"customer_id": 2, "region": "North America", "preferences": ["LM358"]}
-        ]
-        inventory = {"LM741": 300, "LM358": 150, "OP07": 80}
-        competition = {"LM741": 2.50, "LM358": 2.40, "OP07": 2.60}
-        feedback = [
-            "LM741 is reliable but sometimes out of stock.",
-            "LM358 price is competitive.",
-            "OP07 needs better documentation."
-        ]
-        
-        with st.spinner("🔍 Analyzing market trends and forecasting demand..."):
-            try:
-                forecast = forecast_agent.generate_demand_forecast(
-                    historical_sales, market_trends, seasonality, economic_data,
-                    customer_profiles, inventory, competition, feedback
-                )
-                context['demand_forecast'] = forecast
-                
-                # Parse the output for visualization
-                parsed_output = parse_agent_output(forecast, 'demand_forecast')
-                st.session_state['agent_outputs']['demand_forecast'] = parsed_output
-                
-                # Display results
-                st.success("✅ Demand forecast generated successfully!")
-                
-                # Display the actual agent output
-                st.markdown("### 📋 Agent Output")
-                st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-                st.text(forecast)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Create visualizations based on parsed data
-                if parsed_output and parsed_output['extracted_data']:
-                    st.markdown("### 📊 Extracted Insights")
-                    
-                    # Create a simple visualization of mentioned products
-                    products = list(parsed_output['extracted_data'].keys())
-                    if products:
-                        mentioned_data = {
-                            'Product': products,
-                            'Mentioned': [True] * len(products)
-                        }
-                        df = pd.DataFrame(mentioned_data)
-                        
-                        fig = px.bar(df, x='Product', y='Mentioned', 
-                                    title="Products Mentioned in Forecast",
-                                    color_discrete_sequence=['#3498db'])
-                        st.plotly_chart(fig, use_container_width=True)
-                
-                # Display metrics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Products Analyzed", len(historical_sales))
-                with col2:
-                    st.metric("Regions Covered", len(market_trends))
-                with col3:
-                    st.metric("Customer Profiles", len(customer_profiles))
-                
-                update_agent_status('demand_forecast', 'Completed')
-                
-            except Exception as e:
-                st.error(f"❌ Error generating demand forecast: {str(e)}")
-                update_agent_status('demand_forecast', 'Error')
-    elif 'demand_forecast' in context:
-        # Check if this is a fresh result from the current session
-        if st.session_state.get('agent_status', {}).get('demand_forecast') == 'Completed':
-            st.success("✅ Using recently generated forecast")
-        else:
-            st.info("ℹ️ Using previously generated forecast. Click 'Run Demand Forecast' to update.")
-        
-        forecast = context['demand_forecast']
-        
-        # Display the actual agent output
-        st.markdown("### 📋 Agent Output")
-        st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-        st.text(forecast)
-        st.markdown('</div>', unsafe_allow_html=True)
 
-# Agent 2: Production Scheduling
-with st.expander("🏭 Agent 2: Production & Inventory Optimization", expanded=True):
-    if st.button("⚙️ Generate Production Schedule", key="production") or run_production or (run_all and not run_pipeline):
-        update_agent_status('production_schedule', 'Running')
-        scheduler = ProductionSchedulerAgent(context=context)
-        
-        # Sample data - in a real app, this would come from a database or API
-        components = [
-            {"part_number": "LM741", "lead_time": 14, "available_qty": 1200},
-            {"part_number": "LM358", "lead_time": 10, "available_qty": 900},
-            {"part_number": "OP07", "lead_time": 21, "available_qty": 500}
-        ]
-        stock_levels = {"LM741": 300, "LM358": 150, "OP07": 80}
-        production_capacity = 1000
-        
-        with st.spinner("🔄 Optimizing production schedule..."):
-            try:
-                schedule = scheduler.generate_production_plan(
-                    components, stock_levels, production_capacity=production_capacity
-                )
-                context['production_schedule'] = schedule
-                
-                # Parse the output for visualization
-                parsed_output = parse_agent_output(schedule, 'production_schedule')
-                st.session_state['agent_outputs']['production_schedule'] = parsed_output
-                
-                # Display results
-                st.success("✅ Production schedule generated successfully!")
-                
-                # Display the actual agent output
-                st.markdown("### 📋 Agent Output")
-                st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-                st.text(schedule)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Create visualizations based on parsed data
-                if parsed_output and parsed_output['extracted_data']:
-                    st.markdown("### 📊 Extracted Insights")
-                    
-                    # Create a visualization of production quantities
-                    products = list(parsed_output['extracted_data'].keys())
-                    if products:
-                        production_data = []
-                        for product in products:
-                            data = parsed_output['extracted_data'][product]
-                            if 'production_quantities' in data and data['production_quantities']:
-                                production_data.append({
-                                    'Product': product,
-                                    'Production Quantity': max(data['production_quantities'])
-                                })
-                        
-                        if production_data:
-                            df = pd.DataFrame(production_data)
-                            fig = px.bar(df, x='Product', y='Production Quantity',
-                                        title="Production Quantities by Product",
-                                        color_discrete_sequence=['#2ecc71'])
-                            st.plotly_chart(fig, use_container_width=True)
-                
-                # Display metrics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Components Analyzed", len(components))
-                with col2:
-                    st.metric("Production Capacity", production_capacity)
-                with col3:
-                    st.metric("Total Current Stock", sum(stock_levels.values()))
-                
-                update_agent_status('production_schedule', 'Completed')
-                
-            except Exception as e:
-                st.error(f"❌ Error generating production schedule: {str(e)}")
-                update_agent_status('production_schedule', 'Error')
-    elif 'production_schedule' in context:
-        # Check if this is a fresh result from the current session
-        if st.session_state.get('agent_status', {}).get('production_schedule') == 'Completed':
-            st.success("✅ Using recently generated production schedule")
-        else:
-            st.info("ℹ️ Using previously generated production schedule. Click 'Generate Production Schedule' to update.")
-        
-        schedule = context['production_schedule']
-        
-        # Display the actual agent output
-        st.markdown("### 📋 Agent Output")
-        st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-        st.text(schedule)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-# Agent 3: Component Sourcing
-with st.expander("🔍 Agent 3: Component Sourcing & Risk Management", expanded=True):
-    if st.button("🔄 Source Components", key="sourcing") or run_sourcing or (run_all and not run_pipeline):
-        update_agent_status('component_sourcing', 'Running')
-        sourcing_agent = ComponentSourcingAgent(context=context)
-        
-        with st.spinner("🔎 Sourcing components and assessing risks..."):
-            try:
-                # Use a sample forecast to extract requirements
-                sample_forecast = "Demand for LM741: 100 units, LM358: 80 units, OP07: 60 units"
-                requirements = sourcing_agent.extract_requirements_from_forecast(sample_forecast)
-                sourcing_results = sourcing_agent.source_requirements(requirements)
-                
-                context['sourcing_results'] = sourcing_results
-                
-                # Parse the output for visualization
-                parsed_outputs = []
-                for result in sourcing_results:
-                    if result:
-                        parsed_output = parse_agent_output(result, 'component_sourcing')
-                        parsed_outputs.append(parsed_output)
-                
-                st.session_state['agent_outputs']['component_sourcing'] = parsed_outputs
-                
-                # Display results
-                st.success("✅ Component sourcing complete!")
-                
-                # Display the actual agent outputs
-                st.markdown("### 📋 Agent Outputs")
-                if not sourcing_results:
-                    st.warning("No sourcing requirements identified.")
-                else:
-                    for pn, data in sourcing_results.items():
-                        comp = data.get("component") or {}
-                        risk = data.get("risk_report") or {}
-                        
-                        st.markdown(f"**Component: {pn}**")
-                        st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-                        st.text(f"Requested Quantity: {data.get('requested_quantity', 0)}")
-                        st.text(f"Stock Available: {comp.get('stock', 0)}")
-                        st.text(f"Lead Time: {comp.get('lead_time', '-')} days")
-                        st.text(f"Price: ${comp.get('price', '-')}")
-                        if risk:
-                            st.text(f"Risk Score: {risk.get('risk_score', '-')}/10")
-                            st.text(f"Supplier Rating: {risk.get('supplier_rating', '-')}/10")
-                            if risk.get('risk_factors'):
-                                st.text(f"Risk Factors: {', '.join(risk.get('risk_factors'))}")
-                            if risk.get('mitigation_strategies'):
-                                st.text(f"Mitigation: {', '.join(risk.get('mitigation_strategies'))}")
-                        st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Create visualizations based on parsed data
-                if parsed_outputs:
-                    st.markdown("### 📊 Component Analysis")
-                    
-                    # Prepare data for visualization
-                    sourcing_data = []
-                    for pn, data in sourcing_results.items():
-                        comp = data.get("component") or {}
-                        risk = data.get("risk_report") or {}
-                        sourcing_data.append({
-                            'Part Number': pn,
-                            'Price ($)': comp.get('price', 0),
-                            'Stock': comp.get('stock', 0),
-                            'Lead Time (days)': comp.get('lead_time', 0),
-                            'Risk Score': risk.get('risk_score', 0)
-                        })
-                    
-                    if sourcing_data:
-                        df = pd.DataFrame(sourcing_data)
-                        
-                        # Risk distribution chart
-                        fig_risk = px.bar(df, x='Part Number', y='Risk Score',
-                                        title="Component Risk Assessment",
-                                        color='Risk Score',
-                                        color_continuous_scale='RdYlGn_r')
-                        st.plotly_chart(fig_risk, use_container_width=True)
-                        
-                        # Price vs Lead Time scatter plot
-                        fig_sourcing = px.scatter(df, 
-                                               x='Lead Time (days)', 
-                                               y='Price ($)',
-                                               size='Stock',
-                                               color='Risk Score',
-                                               text='Part Number',
-                                               title="Price vs Lead Time Analysis")
-                        st.plotly_chart(fig_sourcing, use_container_width=True)
-                        
-                        # Display sourcing details
-                        st.subheader("Component Sourcing Details")
-                        st.dataframe(df, use_container_width=True)
-                
-                # Display metrics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Components Sourced", len(sourcing_results))
-                with col2:
-                    risk_scores = [data.get("risk_report", {}).get("risk_score", 0) for data in sourcing_results.values()]
-                    avg_risk = sum(risk_scores) / len(risk_scores) if risk_scores else 0
-                    st.metric("Average Risk Score", f"{avg_risk:.1f}/10")
-                with col3:
-                    total_stock = sum(data.get("component", {}).get("stock", 0) for data in sourcing_results.values())
-                    st.metric("Total Available Stock", total_stock)
-                
-                update_agent_status('component_sourcing', 'Completed')
-                
-            except Exception as e:
-                st.error(f"❌ Error during component sourcing: {str(e)}")
-                update_agent_status('component_sourcing', 'Error')
-    elif 'sourcing_results' in context:
-        # Check if this is a fresh result from the current session
-        if st.session_state.get('agent_status', {}).get('component_sourcing') == 'Completed':
-            st.success("✅ Using recently sourced components")
-        else:
-            st.info("ℹ️ Using previously sourced components. Click 'Source Components' to update.")
-        
-        sourcing_results = context['sourcing_results']
-        
-        # Display the actual agent outputs
-        st.markdown("### 📋 Agent Outputs")
-        if not sourcing_results:
-            st.warning("No sourcing requirements identified.")
-        else:
-            for pn, data in sourcing_results.items():
-                comp = data.get("component") or {}
-                risk = data.get("risk_report") or {}
-                
-                st.markdown(f"**Component: {pn}**")
-                st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-                st.text(f"Requested Quantity: {data.get('requested_quantity', 0)}")
-                st.text(f"Stock Available: {comp.get('stock', 0)}")
-                st.text(f"Lead Time: {comp.get('lead_time', '-')} days")
-                st.text(f"Price: ${comp.get('price', '-')}")
-                if risk:
-                    st.text(f"Risk Score: {risk.get('risk_score', '-')}/10")
-                    st.text(f"Supplier Rating: {risk.get('supplier_rating', '-')}/10")
-                    if risk.get('risk_factors'):
-                        st.text(f"Risk Factors: {', '.join(risk.get('risk_factors'))}")
-                    if risk.get('mitigation_strategies'):
-                        st.text(f"Mitigation: {', '.join(risk.get('mitigation_strategies'))}")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-# Agent 4: Logistics
-with st.expander("🚚 Agent 4: Global Logistics & Fulfillment", expanded=True):
-    if st.button("🚚 Plan Logistics", key="logistics") or run_logistics or (run_all and not run_pipeline):
-        update_agent_status('logistics', 'Running')
-        logistics_agent = LogisticsManagerAgent(context=context)
-        
-        finished_goods = [
-            {"part_number": "LM741", "quantity": 400, "destination": "Berlin"},
-            {"part_number": "LM358", "quantity": 300, "destination": "New York"},
-            {"part_number": "OP07", "quantity": 200, "destination": "Tokyo"}
-        ]
-        locations = {
-            "Berlin": "Berlin Warehouse, Germany",
-            "New York": "NYC Fulfillment Center, USA",
-            "Tokyo": "Tokyo Logistics Hub, Japan"
-        }
-        timelines = {
-            "LM741": "2025-08-20",
-            "LM358": "2025-08-18",
-            "OP07": "2025-08-25"
-        }
-        
-        with st.spinner("🚚 Planning logistics..."):
-            try:
-                plan = logistics_agent.generate_logistics_plan(finished_goods, locations, timelines)
-                context['logistics_plan'] = plan
-                
-                # Parse the output for visualization
-                parsed_output = parse_agent_output(plan, 'logistics')
-                st.session_state['agent_outputs']['logistics'] = parsed_output
-                
-                # Display results
-                st.success("✅ Logistics plan generated successfully!")
-                
-                # Display the actual agent output
-                st.markdown("### 📋 Agent Output")
-                st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-                st.text(plan)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Create visualizations based on parsed data
-                if parsed_output and parsed_output['extracted_data']:
-                    st.markdown("### 📊 Logistics Analysis")
-                    
-                    # Create a visualization of destinations
-                    destinations = [k for k, v in parsed_output['extracted_data'].items() if isinstance(v, dict) and v.get('mentioned')]
-                    if destinations:
-                        dest_data = {
-                            'Destination': destinations,
-                            'Shipments': [1] * len(destinations)
-                        }
-                        df = pd.DataFrame(dest_data)
-                        
-                        fig = px.pie(df, values='Shipments', names='Destination',
-                                    title="Shipment Distribution by Destination")
-                        st.plotly_chart(fig, use_container_width=True)
-                
-                # Display metrics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Shipments", len(finished_goods))
-                with col2:
-                    st.metric("Destinations", len(locations))
-                with col3:
-                    total_quantity = sum(item['quantity'] for item in finished_goods)
-                    st.metric("Total Quantity", total_quantity)
-                
-                update_agent_status('logistics', 'Completed')
-                
-            except Exception as e:
-                st.error(f"❌ Error generating logistics plan: {str(e)}")
-                update_agent_status('logistics', 'Error')
-    elif 'logistics_plan' in context:
-        # Check if this is a fresh result from the current session
-        if st.session_state.get('agent_status', {}).get('logistics') == 'Completed':
-            st.success("✅ Using recently generated logistics plan")
-        else:
-            st.info("ℹ️ Using previously generated logistics plan. Click 'Plan Logistics' to update.")
-        
-        plan = context['logistics_plan']
-        
-        # Display the actual agent output
-        st.markdown("### 📋 Agent Output")
-        st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-        st.text(plan)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-# Complete Pipeline Execution
-with st.expander("🔄 Complete Pipeline Execution (demo_agent.py)", expanded=False):
-    if st.button("🚀 Execute Complete Pipeline", key="pipeline") or run_pipeline:
-        st.info("🔄 Running complete pipeline from demo_agent.py...")
-        
-        # Initialize shared context
-        shared_context = {}
-        
-        # Step 1: Demand Forecasting
-        with st.spinner("📈 Step 1/4: Generating demand forecast..."):
-            try:
-                historical_sales = [
-                    {"product": "LM741", "region": "Europe", "sales": [100, 120, 130, 110]},
-                    {"product": "LM358", "region": "North America", "sales": [90, 95, 100, 105]},
-                    {"product": "OP07", "region": "Asia", "sales": [60, 70, 80, 75]},
-                ]
-                market_trends = {"Europe": "Stable", "North America": "Growing", "Asia": "Volatile"}
-                seasonality = {"Q1": "Low", "Q2": "Medium", "Q3": "High", "Q4": "Medium"}
-                economic_data = {"Europe": "Inflation 2%", "North America": "GDP growth 3%", "Asia": "Currency fluctuation"}
-                customer_profiles = [
-                    {"customer_id": 1, "region": "Europe", "preferences": ["LM741", "OP07"]},
-                    {"customer_id": 2, "region": "North America", "preferences": ["LM358"]},
-                ]
-                inventory = {"LM741": 300, "LM358": 150, "OP07": 80}
-                competition = {"LM741": 2.50, "LM358": 2.40, "OP07": 2.60}
-                feedback = [
-                    "LM741 is reliable but sometimes out of stock.",
-                    "LM358 price is competitive.",
-                    "OP07 needs better documentation.",
-                ]
-                
-                forecast_agent = DemandForecastAgent(context=shared_context)
-                forecast_report = forecast_agent.generate_demand_forecast(
-                    historical_sales, market_trends, seasonality, economic_data,
-                    customer_profiles, inventory, competition, feedback
-                )
-                shared_context["demand_forecast"] = forecast_report
-                
-                st.success("✅ Demand forecast completed!")
-                st.markdown("### 📊 Demand Forecast Results")
-                st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-                st.text(forecast_report)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-            except Exception as e:
-                st.error(f"❌ Error in demand forecasting: {e}")
-                st.stop()
-        
-        # Step 2: Component Sourcing
-        with st.spinner("🔍 Step 2/4: Sourcing components..."):
-            try:
-                sourcing_agent = ComponentSourcingAgent(context=shared_context)
-                requirements = sourcing_agent.extract_requirements_from_forecast(forecast_report)
-                sourcing_results = sourcing_agent.source_requirements(requirements)
-                
-                st.success("✅ Component sourcing completed!")
-                st.markdown("### 🔍 Component Sourcing Results")
-                
-                if not sourcing_results:
-                    st.warning("No sourcing requirements identified from the forecast.")
-                else:
-                    for pn, data in sourcing_results.items():
-                        comp = data.get("component") or {}
-                        risk = data.get("risk_report") or {}
-                        
-                        st.markdown(f"**Component: {pn}**")
-                        st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-                        st.text(f"Requested Quantity: {data.get('requested_quantity', 0)}")
-                        st.text(f"Stock Available: {comp.get('stock', 0)}")
-                        st.text(f"Lead Time: {comp.get('lead_time', '-')} days")
-                        st.text(f"Price: ${comp.get('price', '-')}")
-                        if risk:
-                            st.text(f"Risk Score: {risk.get('risk_score', '-')}/10")
-                            st.text(f"Supplier Rating: {risk.get('supplier_rating', '-')}/10")
-                            if risk.get('risk_factors'):
-                                st.text(f"Risk Factors: {', '.join(risk.get('risk_factors'))}")
-                            if risk.get('mitigation_strategies'):
-                                st.text(f"Mitigation: {', '.join(risk.get('mitigation_strategies'))}")
-                        st.markdown('</div>', unsafe_allow_html=True)
-                
-            except Exception as e:
-                st.error(f"❌ Error in component sourcing: {e}")
-                st.stop()
-        
-        # Step 3: Production Scheduling
-        with st.spinner("🏭 Step 3/4: Generating production plan..."):
-            try:
-                # Build components list for scheduler from sourcing results
-                components = []
-                for pn, data in sourcing_results.items():
-                    comp = data.get("component") or {}
-                    components.append({
-                        "part_number": pn,
-                        "lead_time": comp.get("lead_time", 14),
-                        "available_qty": comp.get("stock", 0)
-                    })
-                stock_levels = {pn: (data.get("component") or {}).get("stock", 0) for pn, data in sourcing_results.items()}
-                production_capacity = 200
-                
-                scheduler = ProductionSchedulerAgent(context=shared_context)
-                production_plan = scheduler.generate_production_plan(components, stock_levels, production_capacity)
-                shared_context["production_plan"] = production_plan
-                
-                st.success("✅ Production plan completed!")
-                st.markdown("### 🏭 Production Plan Results")
-                st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-                st.text(production_plan)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-            except Exception as e:
-                st.error(f"❌ Error in production scheduling: {e}")
-                st.stop()
-        
-        # Step 4: Logistics Planning
-        with st.spinner("🚚 Step 4/4: Planning logistics..."):
-            try:
-                finished_goods = [
-                    {"part_number": "LM741", "quantity": 400, "destination": "Berlin"},
-                    {"part_number": "LM358", "quantity": 300, "destination": "New York"},
-                    {"part_number": "OP07", "quantity": 200, "destination": "Tokyo"},
-                ]
-                locations = {
-                    "Berlin": "Berlin Warehouse, Germany",
-                    "New York": "NYC Fulfillment Center, USA",
-                    "Tokyo": "Tokyo Logistics Hub, Japan",
-                }
-                timelines = {"LM741": "2025-08-20", "LM358": "2025-08-18", "OP07": "2025-08-25"}
-                
-                logistics_agent = LogisticsManagerAgent(context=shared_context)
-                logistics_plan = logistics_agent.generate_logistics_plan(finished_goods, locations, timelines)
-                shared_context["logistics_plan"] = logistics_plan
-                
-                st.success("✅ Logistics plan completed!")
-                st.markdown("### 🚚 Logistics Plan Results")
-                st.markdown('<div class="agent-output">', unsafe_allow_html=True)
-                st.text(logistics_plan)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-            except Exception as e:
-                st.error(f"❌ Error in logistics planning: {e}")
-                st.stop()
-        
-        # Pipeline Summary
-        st.success("🎉 Complete pipeline executed successfully!")
-        st.markdown("### 📋 Pipeline Summary")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Demand Forecast", "✅ Completed")
-        with col2:
-            st.metric("Component Sourcing", f"✅ {len(sourcing_results)} components")
-        with col3:
-            st.metric("Production Plan", "✅ Generated")
-        with col4:
-            st.metric("Logistics Plan", "✅ Optimized")
-        
-        # Update session state
-        st.session_state['context'] = shared_context
-        st.session_state['agent_status'] = {
-            'demand_forecast': 'Completed',
-            'production_schedule': 'Completed',
-            'component_sourcing': 'Completed',
-            'logistics': 'Completed'
-        }
-        st.session_state['last_run'] = time.strftime("%Y-%m-%d %H:%M:%S")
+ # Complete pipeline demo removed to avoid verbose outputs in Agent 1 view
 
 # System Overview
 with st.expander("🔍 System Overview & Agent Interactions", expanded=False):

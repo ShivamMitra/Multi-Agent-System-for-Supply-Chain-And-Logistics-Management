@@ -40,21 +40,23 @@ Your tasks:
 Use the Groq API (llama-3.3-70b-versatile) to generate actionable demand forecasts and marketing insights.
 Return ONLY the demand forecast report and suggested actions as a string. Do not return any explanation or JSON.
 """
-        if not self.groq_client:
+        if not self.groq_client or self.context.get('offline'):
             return self._offline_forecast()
-        if not self.groq_client:
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2
+            )
+            report = response.choices[0].message.content.strip()
+            return report
+        except Exception as e:
+            logger.warning(f"Forecast API failed, using offline fallback: {e}")
             return self._offline_forecast()
-        response = self.groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2
-        )
-        report = response.choices[0].message.content.strip()
-        return report
     
     def _offline_forecast(self) -> str:
         return (
-            "Demand summary: LM741 stable in EU, LM358 growing in NA, OP07 volatile in AS. "
+            "Demand forecast: LM741 120 in Europe, LM358 150 in North America, OP07 90 in Asia. "
             "Recommendations: increase LM358 production, maintain LM741, monitor OP07. Pricing: competitive for LM358."
         )
 class LogisticsManagerAgent:
@@ -88,19 +90,19 @@ Your tasks:
 Use the Groq API (llama-3.3-70b-versatile) to generate logistics decisions and route summaries.
 Return ONLY the optimized shipment plan and warehouse allocation as a string. Do not return any explanation or JSON.
 """
-        if not self.groq_client:
-            return self._offline_plan()
-        if not self.groq_client:
+        if not self.groq_client or self.context.get('offline'):
             return self._offline_logistics()
-        if not self.groq_client:
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2
+            )
+            plan = response.choices[0].message.content.strip()
+            return plan
+        except Exception as e:
+            logger.warning(f"Logistics API failed, using offline fallback: {e}")
             return self._offline_logistics()
-        response = self.groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2
-        )
-        plan = response.choices[0].message.content.strip()
-        return plan
     
     def _offline_logistics(self) -> str:
         return (
@@ -109,7 +111,7 @@ Return ONLY the optimized shipment plan and warehouse allocation as a string. Do
     
     def _offline_plan(self) -> str:
         return (
-            "Production plan: build 200 units per cycle prioritizing LM358, reorder OP07 (500), LM358 (300)."
+            "Production plan: Produce LM358 600, LM741 300, OP07 100. Reorder OP07 (500), LM358 (300)."
         )
 import os
 import json
@@ -484,15 +486,23 @@ Analyze the data and output ONLY the final production plan as a string. The plan
 - Reorder recommendations (which components to reorder, how many, and when)
 Do not return any explanation or JSON, only the final production plan as a string.
 """
-        if not self.groq_client:
+        if not self.groq_client or self.context.get('offline'):
             return self._offline_plan()
-        response = self.groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2
-        )
-        plan = response.choices[0].message.content.strip()
-        return plan
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2
+            )
+            plan = response.choices[0].message.content.strip()
+            return plan
+        except Exception as e:
+            logger.warning(f"Production API failed, using offline fallback: {e}")
+            return self._offline_plan()
+
+    def _offline_plan(self) -> str:
+        # Include explicit product quantities to support UI parsing
+        return "Production plan: Produce LM358 600, LM741 300, OP07 100. Reorder OP07 (500), LM358 (300)."
 
 if __name__ == "__main__":
     main()
